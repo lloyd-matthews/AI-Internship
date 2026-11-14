@@ -1,0 +1,49 @@
+-prompt:
+
+Now:
+1. Start the stage 5 server with uvicorn on port 8000
+2. Run python test_all_stages.py and show me the results
+3. Send a test question to the /ask endpoint using curl and show me the JSON response
+4. Stop the uvicorn server on port 8000
+5. Confirm the response contains three things: answer, tokens_used, and cost_usd
+
+If anything fails, fix it and explain what was wrong in simple terms.
+
+-result:
+
+The stage 5 server ran on port 8000, all five smoke tests passed, and a live /ask call returned answer, tokens_used, and cost_usd. The server is stopped and port 8000 is free.
+
+Tests (test_all_stages.py): 5/5 stages passed.
+
+
+=== Stage 1: bare /ask ===
+  [PASS] HTTP 200
+  [PASS] answer is str: str
+  [PASS] tokens_used=56
+  [PASS] keys=['answer', 'tokens_used']
+=== Stage 2: structured output ===
+  [PASS] HTTP 200
+  [PASS] answer is object
+  [PASS] confidence=0.95
+  [PASS] sources_needed=False
+  [PASS] tokens_used=148
+=== Stage 3: guardrail + retry ===
+  [PASS] normal HTTP 200
+  [PASS] force_bad HTTP 200 (retry should recover)
+  [PASS] force_bad answer is structured object
+=== Stage 4: model + latency ===
+  [PASS] HTTP 200
+  [PASS] model=gpt-4o-mini
+  [PASS] latency_ms=1605
+  [PASS] cost_usd absent (stage 4 only)
+=== Stage 5: cost readout ===
+  [PASS] HTTP 200
+  [PASS] cost_usd=0.00077
+  [PASS] gpt-4o $0.000770 > mini $0.000049
+5/5 stages passed
+/ask response for “What is chunking?”:
+
+
+{"answer":{"answer":"Chunking refers to a process or technique used in psychology to improve a person’s ability to remember information by breaking down a large amount of information into smaller, more manageable, and meaningful units or chunks. ...","confidence":0.95,"sources_needed":false},"tokens_used":612,"model":"gpt-4o","latency_ms":4958,"cost_usd":0.005438}
+
+All three required fields are present: answer (a structured object with the text, confidence 0.95, and sources_needed false), tokens_used (612), and cost_usd (0.005438).

@@ -5,6 +5,9 @@
 secrets.toml
 .streamlit/secrets.toml
 
+# Unused code
+_unused/
+
 # Python
 __pycache__/
 *.py[cod]

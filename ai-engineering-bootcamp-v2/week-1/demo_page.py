@@ -5,6 +5,7 @@ Run this page:
 """
 
 import json
+import sys
 
 import httpx
 import streamlit as st
@@ -87,9 +88,19 @@ def call_ask(base_url: str, payload: dict) -> tuple[int, dict | str]:
 
 def render_curl(base_url: str, payload: dict) -> str:
     body = json.dumps(payload)
+    url = f"{base_url.rstrip('/')}/ask"
+    if sys.platform == "win32":
+        # PowerShell: single quotes are literal; a ' inside them is written as ''.
+        # curl.exe avoids the Invoke-WebRequest alias.
+        ps_body = body.replace("'", "''")
+        return (
+            f'curl.exe -s -X POST {url} '
+            f'-H "Content-Type: application/json" -d \'{ps_body}\''
+        )
+    sh_body = body.replace("'", "'\\''")
     return (
-        f'curl -s -X POST {base_url.rstrip("/")}/ask '
-        f'-H "Content-Type: application/json" -d \'{body}\''
+        f"curl -s -X POST {url} "
+        f"-H 'Content-Type: application/json' -d '{sh_body}'"
     )
 
 

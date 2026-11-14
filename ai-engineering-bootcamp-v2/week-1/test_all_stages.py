@@ -18,11 +18,17 @@ def free_port() -> int:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
 
+## Cursor added this method to support both Mac/Linux and Windows.
+def uvicorn_executable() -> Path:
+    if sys.platform == "win32":
+        return WORKDIR / ".venv" / "Scripts" / "uvicorn.exe"
+    return WORKDIR / ".venv" / "bin" / "uvicorn"
 
 def start_server(module: str, port: int) -> subprocess.Popen:
     return subprocess.Popen(
         [
-            str(WORKDIR / ".venv/bin/uvicorn"),
+            ## Cursor changed this line, see comment for uvicorn_executable().
+            str(uvicorn_executable()),
             f"{module}:app",
             "--host",
             "127.0.0.1",
