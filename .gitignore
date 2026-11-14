@@ -37,3 +37,16 @@ env/
 
 # Local scratch (not part of the course repo)
 ai-eng-demo-1/
+
+# Other courses
+.github/workflows/
+ai-builders-bootcamp/
+ai-engineering-bootcamp/
+ai-portfolio-bootcamp/starter-repo/
+build-your-first-mcp/
+claude-agent-sdk-challenge/
+claude-architect-bootcamp/
+cracking-ai-eng-ai-fde-interview/
+lightning-lesson-demos/
+mcp-apps-challenge/
+multi-agent-systems/
