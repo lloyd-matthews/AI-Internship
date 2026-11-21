@@ -1,0 +1,8 @@
+### Code before changes
+_original/
+
+### week-2 notebook was run in class, folder is not used in HW
+week-2/
+
+### Notes
+ *.local.txt is in top-lvel .gitignore

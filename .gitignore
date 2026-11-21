@@ -38,7 +38,13 @@ env/
 # Local scratch (not part of the course repo)
 ai-eng-demo-1/
 
-# Other courses
+## My added files and folders
+# Notes
+*.local.txt
+#  "ai-engineering-bootcamp-v2\week-1" is used for all assignments
+#   this folder has the original repo code
+
+## Other courses
 .github/workflows/
 ai-builders-bootcamp/
 ai-engineering-bootcamp/
