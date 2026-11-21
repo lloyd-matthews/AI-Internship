@@ -15,6 +15,9 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 app = FastAPI()
 client = OpenAI()
 
+# This stage does not accept a model override.
+DEFAULT_MODEL = "gpt-6-luna"
+
 
 class Answer(BaseModel):
     """Structured model output — this is what turns a chatbot into a component."""
@@ -38,7 +41,7 @@ def ask(body: AskRequest) -> AskResponse:
     """Force the model into a fixed schema via OpenAI structured output."""
 
     completion = client.chat.completions.parse(
-        model="gpt-4o-mini",
+        model=DEFAULT_MODEL,
         messages=[{"role": "user", "content": body.question}],
         response_format=Answer,
     )

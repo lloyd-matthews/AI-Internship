@@ -15,6 +15,9 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 app = FastAPI()
 client = OpenAI()
 
+# This stage does not accept a model override.
+DEFAULT_MODEL = "gpt-6-luna"
+
 
 class Answer(BaseModel):
     answer: str
@@ -34,7 +37,7 @@ class AskResponse(BaseModel):
 
 def call_structured(question: str) -> tuple[Answer, int]:
     completion = client.chat.completions.parse(
-        model="gpt-4o-mini",
+        model=DEFAULT_MODEL,
         messages=[{"role": "user", "content": question}],
         response_format=Answer,
     )
@@ -48,7 +51,7 @@ def call_structured(question: str) -> tuple[Answer, int]:
 def call_unsafe(question: str) -> tuple[Answer, int]:
     """Demo path: bad instruction makes confidence a string so validation fails."""
     completion = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=DEFAULT_MODEL,
         messages=[
             {
                 "role": "user",

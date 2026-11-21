@@ -52,7 +52,7 @@ Stage 5 example (model + cost):
 ```bash
 curl -s -X POST http://127.0.0.1:8000/ask \
   -H "Content-Type: application/json" \
-  -d '{"question": "What is chunking?", "model": "gpt-4o-mini"}'
+  -d '{"question": "What is chunking?", "model": "gpt-6-luna"}'
 ```
 
 ## Smoke-test all stages

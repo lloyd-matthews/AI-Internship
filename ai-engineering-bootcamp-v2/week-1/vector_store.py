@@ -1,4 +1,8 @@
-"""Pinecone vector store. Ingest and query both embed with text-embedding-3-small."""
+"""Pinecone store for the current document index.
+
+The index embeds the chunk_text field with text-embedding-3-small. Ingest and
+query both go through the documents API; this index does not accept vector upserts.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import OpenAI
 from pinecone import Pinecone
 
@@ -19,7 +24,15 @@ load_dotenv(_ENV_PATH)
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIMENSIONS = 1536
 
-_UPSERT_BATCH = 100
+# Character window for POST /ingest. Override with CHUNK_SIZE / CHUNK_OVERLAP
+# or with chunk_size / chunk_overlap on a single request.
+DEFAULT_CHUNK_SIZE = 800
+DEFAULT_CHUNK_OVERLAP = 100
+
+_UPSERT_BATCH = 20
+# Schema field the index embeds with text-embedding-3-small.
+_TEXT_FIELD = "chunk_text"
+_METADATA_VALUE = str | int | float | bool | list[str]
 
 _index = None
 _index_key: tuple[str, str, str] | None = None
@@ -102,6 +115,128 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     return [item.embedding for item in ordered]
 
 
+def _optional_int_env(name: str) -> int | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+
+
+def resolve_chunking(chunk_size: int | None, chunk_overlap: int | None) -> tuple[int, int]:
+    """Request values win, then CHUNK_SIZE / CHUNK_OVERLAP, then 800 / 100."""
+
+    size = chunk_size if chunk_size is not None else _optional_int_env("CHUNK_SIZE")
+    overlap = chunk_overlap if chunk_overlap is not None else _optional_int_env("CHUNK_OVERLAP")
+    size = DEFAULT_CHUNK_SIZE if size is None else size
+    overlap = DEFAULT_CHUNK_OVERLAP if overlap is None else overlap
+    if size < 1:
+        raise ValueError("chunk_size must be at least 1")
+    if overlap < 0:
+        raise ValueError("chunk_overlap must be 0 or greater")
+    if overlap >= size:
+        raise ValueError("chunk_overlap must be smaller than chunk_size")
+    return size, overlap
+
+
+def chunk_text(text: str, *, chunk_size: int, chunk_overlap: int) -> list[str]:
+    """Split on paragraphs, lines, then words. Drop chunks that are only whitespace."""
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+    return [chunk.strip() for chunk in splitter.split_text(text) if chunk.strip()]
+
+
+def _safe_metadata(metadata: dict | None) -> dict[str, _METADATA_VALUE]:
+    """Keep only values Pinecone will store. Nested objects are rejected."""
+
+    if not metadata:
+        return {}
+    cleaned: dict[str, _METADATA_VALUE] = {}
+    for key, value in metadata.items():
+        if value is None:
+            continue
+        if isinstance(value, bool) or isinstance(value, (int, float, str)):
+            cleaned[str(key)] = value
+            continue
+        if isinstance(value, list) and all(isinstance(item, str) for item in value):
+            cleaned[str(key)] = value
+            continue
+        raise ValueError(
+            f"metadata.{key} must be a string, number, boolean, or list of strings"
+        )
+    return cleaned
+
+
+def _documents_namespace(namespace: str | None) -> str:
+    """Document calls require a namespace. Blank means Pinecone's default."""
+
+    settings = load_settings()
+    chosen = settings.namespace if namespace is None else namespace
+    return chosen.strip() or "__default__"
+
+
+def _document_payload(item_id: str, text: str, meta: dict) -> dict:
+    """One record. Pinecone embeds chunk_text; the other keys are stored metadata."""
+
+    source = str(meta.get("source") or "")
+    document_id = str(meta.get("document_id") or item_id)
+    payload = {
+        "_id": item_id,
+        _TEXT_FIELD: text,
+        "title": source or document_id,
+        "document_id": document_id,
+        "source": source,
+    }
+    for key, value in meta.items():
+        if key in payload:
+            continue
+        payload[key] = value
+    return payload
+
+
+def _upsert_records(
+    records: list[tuple[str, str, dict]],
+    namespace: str | None,
+) -> int:
+    """Write chunks to the document index. Pinecone embeds chunk_text on write."""
+
+    if not records:
+        return 0
+
+    ns = _documents_namespace(namespace)
+    index = get_index()
+    documents = [
+        _document_payload(item_id, text, meta) for item_id, text, meta in records
+    ]
+    written = 0
+    for start in range(0, len(documents), _UPSERT_BATCH):
+        batch = documents[start : start + _UPSERT_BATCH]
+        index.documents.upsert(namespace=ns, documents=batch)
+        written += len(batch)
+    return written
+
+
+def _delete_document_chunks(doc_id: str, namespace: str) -> None:
+    """Remove earlier chunks for this document. IDs are '{document_id}:{chunk_index}'."""
+
+    index = get_index()
+    try:
+        matches = index.documents.list(namespace=namespace, prefix=f"{doc_id}:")
+        ids = [entry.id for entry in matches]
+    except Exception as exc:
+        message = str(exc).lower()
+        if "namespace" in message or "not found" in message:
+            return
+        raise
+    if ids:
+        index.documents.delete(namespace=namespace, ids=ids)
+
+
 def upsert_texts(
     items: list[tuple[str, str]],
     *,
@@ -110,34 +245,70 @@ def upsert_texts(
 ) -> int:
     """Embed (id, text) pairs and upsert them. Returns how many vectors were sent."""
 
-    if not items:
-        return 0
+    extra = _safe_metadata(metadata)
+    records = [(item_id, text, dict(extra)) for item_id, text in items]
+    return _upsert_records(records, namespace)
 
-    settings = load_settings()
-    ns = settings.namespace if namespace is None else namespace
-    index = get_index()
-    extra = metadata or {}
-    written = 0
 
-    for start in range(0, len(items), _UPSERT_BATCH):
-        batch = items[start : start + _UPSERT_BATCH]
-        vectors = embed_texts([text for _, text in batch])
-        payload = [
-            {
-                "id": item_id,
-                "values": values,
-                "metadata": {**extra, "text": text},
-            }
-            for (item_id, text), values in zip(batch, vectors, strict=True)
-        ]
-        index.upsert(
-            vectors=payload,
-            namespace=ns,
-            batch_size=_UPSERT_BATCH,
-            show_progress=False,
+def _require_embedding_dimension() -> None:
+    """Refuse to write vectors the index cannot store."""
+
+    stats = get_index().describe_index_stats()
+    dimension = stats.dimension
+    if dimension != EMBEDDING_DIMENSIONS:
+        raise PineconeConfigError(
+            f"Index dimension is {dimension}; {EMBEDDING_MODEL} writes "
+            f"{EMBEDDING_DIMENSIONS}-dimensional vectors. Recreate the index "
+            f"at dimension {EMBEDDING_DIMENSIONS} before ingesting."
         )
-        written += len(payload)
-    return written
+
+
+def ingest_document(
+    text: str,
+    document_id: str,
+    *,
+    source: str = "",
+    metadata: dict | None = None,
+    chunk_size: int | None = None,
+    chunk_overlap: int | None = None,
+) -> int:
+    """Chunk text and upsert it. The index embeds chunk_text with text-embedding-3-small."""
+
+    cleaned = text.strip()
+    doc_id = document_id.strip()
+    if not cleaned:
+        raise ValueError("text is empty. Send a non-empty document body.")
+    if not doc_id:
+        raise ValueError("document_id is empty. Send a stable id for this document.")
+    if not doc_id.isascii() or any(char.isspace() for char in doc_id):
+        raise ValueError("document_id must be ASCII without spaces.")
+
+    size, overlap = resolve_chunking(chunk_size, chunk_overlap)
+    chunks = chunk_text(cleaned, chunk_size=size, chunk_overlap=overlap)
+    if not chunks:
+        raise ValueError("text produced no chunks.")
+
+    extra = _safe_metadata(metadata)
+    _require_embedding_dimension()
+    source_value = source.strip()
+    records = []
+    for chunk_index, chunk in enumerate(chunks):
+        records.append(
+            (
+                f"{doc_id}:{chunk_index}",
+                chunk,
+                {
+                    **extra,
+                    "document_id": doc_id,
+                    "chunk_index": chunk_index,
+                    "source": source_value,
+                },
+            )
+        )
+
+    namespace = _documents_namespace(None)
+    _delete_document_chunks(doc_id, namespace)
+    return _upsert_records(records, namespace)
 
 
 def query_text(
@@ -146,26 +317,29 @@ def query_text(
     top_k: int = 5,
     namespace: str | None = None,
 ) -> list[dict]:
-    """Embed the query with text-embedding-3-small and return the nearest matches."""
+    """Search chunk_text. The index embeds the query with text-embedding-3-small."""
 
-    settings = load_settings()
-    ns = settings.namespace if namespace is None else namespace
-    vector = embed_texts([query])[0]
-    response = get_index().query(
-        vector=vector,
-        top_k=top_k,
+    from pinecone.models.documents.score_by import EmbedQuery
+
+    ns = _documents_namespace(namespace)
+    response = get_index().documents.search(
         namespace=ns,
-        include_metadata=True,
+        score_by=[EmbedQuery(field=_TEXT_FIELD, query=query)],
+        top_k=top_k,
+        include_fields=[_TEXT_FIELD, "document_id", "chunk_index", "source", "title"],
     )
     hits: list[dict] = []
     for match in response.matches:
-        meta = dict(match.metadata or {})
+        fields = match.to_dict()
+        fields.pop("_id", None)
+        fields.pop("_score", None)
+        text = fields.pop(_TEXT_FIELD, None)
         hits.append(
             {
                 "id": match.id,
                 "score": match.score,
-                "text": meta.get("text"),
-                "metadata": meta,
+                "text": text,
+                "metadata": fields,
             }
         )
     return hits

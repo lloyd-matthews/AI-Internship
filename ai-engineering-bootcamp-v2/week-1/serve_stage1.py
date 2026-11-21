@@ -15,6 +15,9 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 app = FastAPI()
 client = OpenAI()
 
+# This stage does not accept a model override.
+DEFAULT_MODEL = "gpt-6-luna"
+
 
 class AskRequest(BaseModel):
     """Typed request body so bad input is rejected before we spend tokens."""
@@ -34,7 +37,7 @@ def ask(body: AskRequest) -> AskResponse:
     """Answer one question and surface real token usage for cost visibility."""
 
     completion = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=DEFAULT_MODEL,
         messages=[{"role": "user", "content": body.question}],
     )
 

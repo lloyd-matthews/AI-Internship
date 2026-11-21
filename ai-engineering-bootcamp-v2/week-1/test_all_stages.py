@@ -12,23 +12,23 @@ import httpx
 WORKDIR = Path(__file__).resolve().parent
 QUESTION = "What is Retrieval-Augmented Generation in one sentence?"
 
+# Stage 4 sends one explicit model. Stage 5 expects the first to cost more per token.
+MODEL_HIGHER_COST = "gpt-5.6-luna"
+MODEL_LOWER_COST = "gpt-6-luna"
+
 
 def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
 
-## Cursor added this method to support both Mac/Linux and Windows.
-def uvicorn_executable() -> Path:
-    if sys.platform == "win32":
-        return WORKDIR / ".venv" / "Scripts" / "uvicorn.exe"
-    return WORKDIR / ".venv" / "bin" / "uvicorn"
-
 def start_server(module: str, port: int) -> subprocess.Popen:
+    # python -m uvicorn: the Windows uvicorn.exe shim exits before binding a port.
     return subprocess.Popen(
         [
-            ## Cursor changed this line, see comment for uvicorn_executable().
-            str(uvicorn_executable()),
+            sys.executable,
+            "-m",
+            "uvicorn",
             f"{module}:app",
             "--host",
             "127.0.0.1",
@@ -104,10 +104,10 @@ def test_stage3(base: str) -> bool:
 
 def test_stage4(base: str) -> bool:
     print("\n=== Stage 4: model + latency ===")
-    status, data = post(base, {"question": QUESTION, "model": "gpt-4o-mini"})
+    status, data = post(base, {"question": QUESTION, "model": MODEL_LOWER_COST})
     ok = True
     ok &= check("status", status == 200, f"HTTP {status}")
-    ok &= check("model", data.get("model") == "gpt-4o-mini", f"model={data.get('model')}")
+    ok &= check("model", data.get("model") == MODEL_LOWER_COST, f"model={data.get('model')}")
     ok &= check("latency", isinstance(data.get("latency_ms"), int) and data["latency_ms"] > 0, f"latency_ms={data.get('latency_ms')}")
     ok &= check("no cost yet", "cost_usd" not in data, "cost_usd absent (stage 4 only)")
     ok &= check("keys", set(data.keys()) == {"answer", "tokens_used", "model", "latency_ms"}, f"keys={list(data.keys())}")
@@ -116,15 +116,28 @@ def test_stage4(base: str) -> bool:
 
 def test_stage5(base: str) -> bool:
     print("\n=== Stage 5: cost readout ===")
-    _, mini = post(base, {"question": QUESTION, "model": "gpt-4o-mini"})
-    status, full = post(base, {"question": QUESTION, "model": "gpt-4o"})
+    _, lower = post(base, {"question": QUESTION, "model": MODEL_LOWER_COST})
+    status, higher = post(base, {"question": QUESTION, "model": MODEL_HIGHER_COST})
     ok = True
     ok &= check("status", status == 200, f"HTTP {status}")
-    ok &= check("cost_usd", isinstance(full.get("cost_usd"), (int, float)) and full["cost_usd"] > 0, f"cost_usd={full.get('cost_usd')}")
-    ok &= check("all fields", set(full.keys()) == {"answer", "tokens_used", "model", "latency_ms", "cost_usd"}, f"keys={list(full.keys())}")
-    mini_cost = mini.get("cost_usd", 0)
-    full_cost = full.get("cost_usd", 0)
-    ok &= check("cost delta", full_cost > mini_cost, f"gpt-4o ${full_cost:.6f} > mini ${mini_cost:.6f}")
+    ok &= check(
+        "cost_usd",
+        isinstance(higher.get("cost_usd"), (int, float)) and higher["cost_usd"] > 0,
+        f"cost_usd={higher.get('cost_usd')}",
+    )
+    ok &= check(
+        "all fields",
+        set(higher.keys())
+        == {"answer", "tokens_used", "model", "latency_ms", "cost_usd", "retrieved_chunk_ids"},
+        f"keys={list(higher.keys())}",
+    )
+    lower_cost = lower.get("cost_usd", 0)
+    higher_cost = higher.get("cost_usd", 0)
+    ok &= check(
+        "cost delta",
+        higher_cost > lower_cost,
+        f"{MODEL_HIGHER_COST} ${higher_cost:.6f} > {MODEL_LOWER_COST} ${lower_cost:.6f}",
+    )
     return ok
 
 

@@ -10,6 +10,8 @@ import sys
 import httpx
 import streamlit as st
 
+from main import MODEL_PRICES_PER_1K
+
 WORKDIR_CMD = "ai-engineering-bootcamp-v2/week-1"  # path from repo root
 
 STAGES = [
@@ -44,7 +46,7 @@ STAGES = [
         "serve": "uvicorn serve_stage4:app --port 8000 --reload",
         "look_for": "`model` and `latency_ms` in the response; swap models live.",
         "dummy_question": "What is chunking in RAG?",
-        "dummy_model": "gpt-4o-mini",
+        "dummy_model": "gpt-6-luna",
         "fields": ["force_bad", "model"],
     },
     {
@@ -53,7 +55,7 @@ STAGES = [
         "serve": "uvicorn serve_stage5:app --port 8000 --reload",
         "look_for": "`cost_usd` closes the loop — same prompt, different model, different cost.",
         "dummy_question": "What is Retrieval-Augmented Generation in one sentence?",
-        "dummy_model": "gpt-4o",
+        "dummy_model": "gpt-6-luna",
         "fields": ["force_bad", "model"],
     },
 ]
@@ -150,13 +152,16 @@ for tab, stage in zip(tabs, STAGES):
                 key=f"bad_{stage['num']}",
             )
         if "model" in stage["fields"]:
-            options = [None, "gpt-4o", "gpt-4o-mini", "o3-mini"]
-            default_model = stage.get("dummy_model")
+            options = [
+                name
+                for name in MODEL_PRICES_PER_1K
+                if name not in {"gpt-4o", "gpt-4o-mini"}
+            ]
+            default_model = stage.get("dummy_model") or "gpt-6-luna"
             model = st.selectbox(
                 "model",
                 options,
-                index=options.index(default_model) if default_model in options else 0,
-                format_func=lambda m: m or "gpt-4o (default)",
+                index=options.index(default_model) if default_model in options else options.index("gpt-6-luna"),
                 key=f"model_{stage['num']}",
             )
 

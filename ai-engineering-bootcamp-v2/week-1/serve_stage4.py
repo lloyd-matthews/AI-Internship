@@ -16,7 +16,8 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 app = FastAPI()
 client = OpenAI()
 
-DEFAULT_MODEL = "gpt-4o"
+# Used when a request omits model.
+DEFAULT_MODEL = "gpt-6-luna"
 
 
 class Answer(BaseModel):
