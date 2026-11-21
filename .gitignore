@@ -43,6 +43,11 @@ ai-eng-demo-1/
 *.local.txt
 #  "ai-engineering-bootcamp-v2\week-1" is used for all assignments
 #   this folder has the original repo code
+_original/
+
+## Stuff added by cursor
+.agents/
+.claude/
 
 ## Other courses
 .github/workflows/
