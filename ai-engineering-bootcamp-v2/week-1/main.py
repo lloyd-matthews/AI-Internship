@@ -8,6 +8,8 @@ from fastapi import FastAPI, HTTPException
 from openai import OpenAI
 from pydantic import BaseModel, Field, ValidationError
 
+from vector_store import PineconeConfigError, check_pinecone
+
 # Load .env from this folder so the key is found regardless of shell working directory.
 _ENV_PATH = Path(__file__).resolve().parent / ".env"
 load_dotenv(_ENV_PATH)
@@ -157,3 +159,15 @@ def ask(body: AskRequest) -> AskResponse:
         status_code=502,
         detail=f"Model response failed schema validation after retry: {last_error}",
     )
+
+
+@app.get("/health/pinecone")
+def pinecone_health() -> dict:
+    """Debug probe: describe the configured Pinecone index. Response has no secrets."""
+
+    try:
+        return check_pinecone()
+    except PineconeConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Pinecone unreachable: {exc}") from exc
